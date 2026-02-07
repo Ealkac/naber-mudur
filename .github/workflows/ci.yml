@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      resumeUrl:
+        description: "n8n callback URL"
+        required: false
+        type: string
+
+concurrency:
+  group: ci-$
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "manager=pnpm" >> $GITHUB_OUTPUT
+          elif [ -f yarn.lock ]; then
+            echo "manager=yarn" >> $GITHUB_OUTPUT
+          else
+            echo "manager=npm" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install deps (npm)
+        if: steps.pm.outputs.manager == 'npm'
+        run: npm ci
+
+      - name: Install deps (pnpm)
+        if: steps.pm.outputs.manager == 'pnpm'
+        run: |
+          corepack enable
+          pnpm -v || true
+          pnpm install --frozen-lockfile
+
+      - name: Install deps (yarn)
+        if: steps.pm.outputs.manager == 'yarn'
+        run: |
+          corepack enable
+          yarn -v || true
+          yarn install --frozen-lockfile
+
+      - name: Lint (if script exists)
+        shell: bash
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.lint?0:1)"; then
+            echo "Running lint..."
+            npm run lint --if-present
+          else
+            echo "No lint script, skipping."
+          fi
+
+      - name: Test (if script exists)
+        shell: bash
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.test?0:1)"; then
+            echo "Running tests..."
+            npm test --if-present
+          else
+            echo "No test script, skipping."
+          fi
+
+      - name: Build (if script exists)
+        shell: bash
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.build?0:1)"; then
+            echo "Running build..."
+            npm run build --if-present
+          else
+            echo "No build script, skipping."
+          fi
